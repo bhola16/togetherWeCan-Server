@@ -175,6 +175,7 @@ app.patch("/events/:id", async (req, res) => {
   }
 });
 
+
 app.post("/eventParticipants", async (req, res) => {
   try {
     const data = req.body;
@@ -193,6 +194,7 @@ app.post("/eventParticipants", async (req, res) => {
       });
     }
 
+    // 1. Find the event.
     const event = await eventsCollection.findOne({
       _id: new ObjectId(eventId),
     });
@@ -203,6 +205,27 @@ app.post("/eventParticipants", async (req, res) => {
       });
     }
 
+    // 2. Check whether the event has already been completed.
+    const eventDate = new Date(
+      `${ event.eventDate.slice(0, 10) } T00:00:00Z`
+    );
+
+    const today = new Date();
+
+    const todayUTC = Date.UTC(
+      today.getUTCFullYear(),
+      today.getUTCMonth(),
+      today.getUTCDate()
+    );
+
+    if (eventDate.getTime() < todayUTC) {
+      return res.status(400).send({
+        message:
+          "This event has already been completed. Registration is closed.",
+      });
+    }
+
+    // 3. Check whether the user has already joined.
     const existingParticipant = await eventParticipantsCollection.findOne({
       eventId,
       userId,
@@ -214,6 +237,7 @@ app.post("/eventParticipants", async (req, res) => {
       });
     }
 
+    // 4. Prepare participant data.
     const participantData = {
       ...data,
       eventTitle: event.title,
@@ -221,6 +245,7 @@ app.post("/eventParticipants", async (req, res) => {
       joinedAt: new Date(),
     };
 
+    // 5. Insert participant.
     const result = await eventParticipantsCollection.insertOne(
       participantData
     );
@@ -244,33 +269,7 @@ app.post("/eventParticipants", async (req, res) => {
   }
 });
 
-app.get("/eventParticipants/check", async (req, res) => {
-  try {
-    const { eventId, userId } = req.query;
 
-    if (!eventId || !userId) {
-      return res.status(400).send({
-        message: "Event ID and User ID are required.",
-      });
-    }
-
-    const existingParticipant =
-      await eventParticipantsCollection.findOne({
-        eventId,
-        userId,
-      });
-
-    res.send({
-      joined: Boolean(existingParticipant),
-    });
-  } catch (error) {
-    console.error("Check participation error:", error);
-
-    res.status(500).send({
-      message: "Failed to check participation.",
-    });
-  }
-});
 
 app.get("/myjoinedevents/:userId", async (req, res) => {
   try {
@@ -309,6 +308,78 @@ app.get("/myjoinedevents/:userId", async (req, res) => {
     });
   }
 });
+
+app.delete("/eventParticipants", async (req, res) => {
+  try {
+    const { eventId, userId } = req.body;
+
+    if (!eventId || !userId) {
+      return res.status(400).send({
+        message: "Event ID and user ID are required.",
+      });
+    }
+
+    if (!ObjectId.isValid(eventId)) {
+      return res.status(400).send({
+        message: "Invalid event ID.",
+      });
+    }
+
+    // Find the event.
+    const event = await eventsCollection.findOne({
+      _id: new ObjectId(eventId),
+    });
+
+    if (!event) {
+      return res.status(404).send({
+        message: "Event not found.",
+      });
+    }
+
+    // Prevent changes to completed events.
+    const eventDate = new Date(
+      `${event.eventDate.slice(0, 10)}T00:00:00Z`,
+    );
+
+    const today = new Date();
+
+    const todayUTC = Date.UTC(
+      today.getUTCFullYear(),
+      today.getUTCMonth(),
+      today.getUTCDate(),
+    );
+
+    if (eventDate.getTime() < todayUTC) {
+      return res.status(400).send({
+        message:
+          "This event has already been completed. Participation cannot be changed.",
+      });
+    }
+
+    // Remove participant.
+    const result = await eventParticipantsCollection.deleteOne({
+      eventId,
+      userId,
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({
+        message: "You have not joined this event.",
+      });
+    }
+
+    return res.status(200).send({
+      message: "You have successfully left this event!",
+    });
+  } catch (error) {
+    console.error("Unjoin event error:", error);
+
+    return res.status(500).send({
+      message: "Failed to leave the event.",
+    });
+  }
+});
+
 
 app.delete("/events/:id", async (req, res) => {
   try {
@@ -404,7 +475,56 @@ app.get("/pastevents-home", async (req, res) => {
 });
 
 
+app.get("/eventParticipants/count", async (req, res) => {
+  try {
+    const { eventId } = req.query;
 
+    if (!eventId) {
+      return res.status(400).send({
+        message: "Event ID is required.",
+      });
+    }
+
+    const count = await eventParticipantsCollection.countDocuments({
+      eventId: eventId.toString(),
+    });
+
+    res.status(200).send({ count });
+  } catch (error) {
+    console.error("Volunteer count error:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch volunteer count.",
+    });
+  }
+});
+
+app.get("/eventParticipants/check", async (req, res) => {
+  try {
+    const { userId, eventId } = req.query;
+
+    if (!userId || !eventId) {
+      return res.status(400).send({
+        message: "User ID and Event ID are required.",
+      });
+    }
+
+    const participant = await eventParticipantsCollection.findOne({
+      userId: userId.toString(),
+      eventId: eventId.toString(),
+    });
+
+    res.status(200).send({
+      joined: !!participant,
+    });
+  } catch (error) {
+    console.error("Check participation error:", error);
+
+    res.status(500).send({
+      message: "Failed to check participation.",
+    });
+  }
+});
 
 
 app.post("/subscribe", async (req, res) => {
