@@ -1,34 +1,31 @@
 import cors from "cors";
-import 'dotenv/config';
+import "dotenv/config";
 import express from "express";
-import { MongoClient, ObjectId } from 'mongodb';
+import { MongoClient, ObjectId } from "mongodb";
 
-const app = express()
-const PORT = 8000
+const app = express();
+const PORT = 8000;
 
+app.use(cors());
+app.use(express.json());
 
-
-app.use(cors())
-app.use(express.json())
-
-
-const client = new MongoClient (process.env.MONGODB_URL)
-
+const client = new MongoClient(process.env.MONGODB_URL);
 
 export async function connectToMongoDB() {
-    try {
+  try {
     await client.connect();
     console.log("You successfully connected to MongoDB!");
     return client;
-  } catch (err) {
-    console.dir(err);
+  } catch (error) {
+    console.error("MongoDB connection error:", error);
+    throw error;
   }
 }
 
+const mongoClient = await connectToMongoDB();
 
-const mongoClient = await connectToMongoDB()
-const db = mongoClient.db('together-wecan')
-const eventsCollection = db.collection("allevents")
+const db = mongoClient.db("together-wecan");
+const eventsCollection = db.collection("allevents");
 const eventParticipantsCollection = db.collection("eventParticipants");
 
 await eventParticipantsCollection.createIndex(
@@ -36,34 +33,65 @@ await eventParticipantsCollection.createIndex(
   { unique: true }
 );
 
+app.post("/create-events", async (req, res) => {
+  try {
+    const data = req.body;
 
-// create events 
-app.post('/create-events', async(req, res) => {
-  const data = req.body
-  const result = await eventsCollection.insertOne(data)
-  res.send(result)
-})
+    const result = await eventsCollection.insertOne(data);
 
+    res.status(201).send(result);
+  } catch (error) {
+    console.error("Create event error:", error);
 
-// get all events
-app.get('/events', async (req, res) => {
-  const result = await eventsCollection.find().toArray();
-  res.send(result);
+    res.status(500).send({
+      message: "Failed to create event.",
+    });
+  }
 });
 
+app.get("/events", async (req, res) => {
+  try {
+    const result = await eventsCollection.find().toArray();
 
+    res.send(result);
+  } catch (error) {
+    console.error("Fetch events error:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch events.",
+    });
+  }
+});
 
 app.get("/events/:id", async (req, res) => {
-  const { id } = req.params;
+  try {
+    const { id } = req.params;
 
-  const result = await eventsCollection.findOne({
-    _id: new ObjectId(id),
-  });
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid event ID.",
+      });
+    }
 
-  res.send(result);
+    const result = await eventsCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!result) {
+      return res.status(404).send({
+        message: "Event not found.",
+      });
+    }
+
+    res.send(result);
+  } catch (error) {
+    console.error("Fetch event error:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch event.",
+    });
+  }
 });
-
-
 
 app.patch("/events/:id", async (req, res) => {
   try {
@@ -97,7 +125,7 @@ app.patch("/events/:id", async (req, res) => {
 
     const result = await eventsCollection.updateOne(
       { _id: new ObjectId(id) },
-      { $set: updatedEvent },
+      { $set: updatedEvent }
     );
 
     if (result.matchedCount === 0) {
@@ -118,7 +146,6 @@ app.patch("/events/:id", async (req, res) => {
   }
 });
 
-
 app.post("/eventParticipants", async (req, res) => {
   try {
     const data = req.body;
@@ -131,7 +158,12 @@ app.post("/eventParticipants", async (req, res) => {
       });
     }
 
-    // Check whether the event exists
+    if (!ObjectId.isValid(eventId)) {
+      return res.status(400).send({
+        message: "Invalid event ID.",
+      });
+    }
+
     const event = await eventsCollection.findOne({
       _id: new ObjectId(eventId),
     });
@@ -142,7 +174,6 @@ app.post("/eventParticipants", async (req, res) => {
       });
     }
 
-    // Check duplicate participation
     const existingParticipant = await eventParticipantsCollection.findOne({
       eventId,
       userId,
@@ -157,6 +188,7 @@ app.post("/eventParticipants", async (req, res) => {
     const participantData = {
       ...data,
       eventTitle: event.title,
+      eventDate: event.eventDate,
       joinedAt: new Date(),
     };
 
@@ -175,7 +207,7 @@ app.post("/eventParticipants", async (req, res) => {
       });
     }
 
-    console.error(error);
+    console.error("Join event error:", error);
 
     res.status(500).send({
       message: "Failed to join the event.",
@@ -203,15 +235,13 @@ app.get("/eventParticipants/check", async (req, res) => {
       joined: Boolean(existingParticipant),
     });
   } catch (error) {
-    console.error(error);
+    console.error("Check participation error:", error);
 
     res.status(500).send({
       message: "Failed to check participation.",
     });
   }
-})
-
-
+});
 
 app.get("/myjoinedevents/:userId", async (req, res) => {
   try {
@@ -221,28 +251,36 @@ app.get("/myjoinedevents/:userId", async (req, res) => {
       .find({ userId })
       .toArray();
 
-    // Get the actual event date for each joined event
     const result = await Promise.all(
       joinedEvents.map(async (joinedEvent) => {
-        const event = await eventsCollection.findOne({
-          _id: new ObjectId(joinedEvent.eventId),
-        });
+        let event = null;
+
+        if (ObjectId.isValid(joinedEvent.eventId)) {
+          event = await eventsCollection.findOne({
+            _id: new ObjectId(joinedEvent.eventId),
+          });
+        }
 
         return {
           ...joinedEvent,
+          event,
+          eventTitle:
+            event?.title ||
+            joinedEvent.eventTitle ||
+            "Event unavailable",
           eventDate: event?.eventDate || null,
+          joinedAt: joinedEvent.joinedAt || null,
         };
       })
     );
 
-    // Sort by event date (earliest first)
     result.sort((a, b) => {
       if (!a.eventDate) return 1;
       if (!b.eventDate) return -1;
 
       return (
-        new Date(a.eventDate).getTime() -
-        new Date(b.eventDate).getTime()
+        new Date(`${a.eventDate.slice(0, 10)}T00:00:00Z`).getTime() -
+        new Date(`${b.eventDate.slice(0, 10)}T00:00:00Z`).getTime()
       );
     });
 
@@ -255,7 +293,6 @@ app.get("/myjoinedevents/:userId", async (req, res) => {
     });
   }
 });
-
 
 app.delete("/events/:id", async (req, res) => {
   try {
@@ -289,18 +326,14 @@ app.delete("/events/:id", async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-// Home server 
-// http://localhost:8000/
-app.get('/', (req, res) => {
-    res.send({message: `Server is running fine!`})
-} )
+app.get("/", (req, res) => {
+  res.send({
+    message: "Server is running fine!",
+  });
+});
 
 app.listen(PORT, () => {
-    console.log(`Server is running at ${PORT}`)
-})
+  console.log(`Server is running at ${PORT}`);
+});
+
+export default app;
