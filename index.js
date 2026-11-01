@@ -27,6 +27,7 @@ const mongoClient = await connectToMongoDB();
 const db = mongoClient.db("together-wecan");
 const eventsCollection = db.collection("allevents");
 const eventParticipantsCollection = db.collection("eventParticipants");
+const subscribersCollection = db.collection("subscribers");
 
 await eventParticipantsCollection.createIndex(
   { eventId: 1, userId: 1 },
@@ -62,6 +63,34 @@ app.get("/events", async (req, res) => {
     });
   }
 });
+
+
+app.get("/upcomingevents", async (req, res) => {
+  try {
+    const today = new Date();
+    const todayString = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, "0"),
+      String(today.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    const upcomingEvents = await eventsCollection
+      .find({
+        eventDate: { $gte: todayString },
+      })
+      .sort({ eventDate: 1 })
+      .limit(6)
+      .toArray();
+
+    res.status(200).json(upcomingEvents);
+  } catch (error) {
+    console.error("Error fetching upcoming events:", error);
+    res.status(500).json({
+      message: "Failed to fetch upcoming events",
+    });
+  }
+});
+
 
 app.get("/events/:id", async (req, res) => {
   try {
@@ -264,25 +293,12 @@ app.get("/myjoinedevents/:userId", async (req, res) => {
         return {
           ...joinedEvent,
           event,
-          eventTitle:
-            event?.title ||
-            joinedEvent.eventTitle ||
-            "Event unavailable",
+          eventTitle: event?.title || joinedEvent.eventTitle,
           eventDate: event?.eventDate || null,
           joinedAt: joinedEvent.joinedAt || null,
         };
       })
     );
-
-    result.sort((a, b) => {
-      if (!a.eventDate) return 1;
-      if (!b.eventDate) return -1;
-
-      return (
-        new Date(`${a.eventDate.slice(0, 10)}T00:00:00Z`).getTime() -
-        new Date(`${b.eventDate.slice(0, 10)}T00:00:00Z`).getTime()
-      );
-    });
 
     res.send(result);
   } catch (error) {
@@ -326,6 +342,111 @@ app.delete("/events/:id", async (req, res) => {
   }
 });
 
+// All past events
+app.get("/pastevents", async (req, res) => {
+  try {
+    const { today } = req.query;
+
+    if (
+      typeof today !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(today)
+    ) {
+      return res.status(400).send({
+        message: "A valid date (YYYY-MM-DD) is required.",
+      });
+    }
+
+    const pastEvents = await eventsCollection
+      .find({
+        eventDate: { $lt: today },
+      })
+      .sort({ eventDate: -1 })
+      .toArray();
+
+    res.status(200).send(pastEvents);
+  } catch (error) {
+    console.error("Fetch past events error:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch past events.",
+    });
+  }
+});
+
+
+
+// Latest 6 past events for homepage
+app.get("/pastevents-home", async (req, res) => {
+  try {
+    const { today } = req.query;
+
+    if (!today || !/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+      return res.status(400).send({
+        message: "A valid date (YYYY-MM-DD) is required.",
+      });
+    }
+
+    const pastEvents = await eventsCollection
+      .find({
+        eventDate: { $lt: today },
+      })
+      .sort({ eventDate: -1 }).limit(6)
+      .toArray();
+
+    res.status(200).send(pastEvents);
+  } catch (error) {
+    console.error("Fetch past events error:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch past events.",
+    });
+  }
+});
+
+
+
+
+
+app.post("/subscribe", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).send({
+        message: "Please provide a valid email address.",
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const existingSubscriber = await subscribersCollection.findOne({
+      email: normalizedEmail,
+    });
+
+    if (existingSubscriber) {
+      return res.status(409).send({
+        message: "This email is already subscribed.",
+      });
+    }
+
+    await subscribersCollection.insertOne({
+      email: normalizedEmail,
+      subscribedAt: new Date(),
+    });
+
+    res.status(201).send({
+      message: "Successfully subscribed!",
+    });
+  } catch (error) {
+    console.error("Subscription error:", error);
+
+    res.status(500).send({
+      message: "Failed to subscribe. Please try again.",
+    });
+  }
+});
+
+// homepage 
 app.get("/", (req, res) => {
   res.send({
     message: "Server is running fine!",
