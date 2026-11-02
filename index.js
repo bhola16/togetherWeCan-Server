@@ -1,6 +1,7 @@
 import cors from "cors";
 import "dotenv/config";
 import express from "express";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { MongoClient, ObjectId } from "mongodb";
 
 const app = express();
@@ -34,7 +35,39 @@ await eventParticipantsCollection.createIndex(
   { unique: true }
 );
 
-app.post("/create-events", async (req, res) => {
+const verifyToken = async (req, res, next) => {
+
+  const authHeader = req.headers.authorization
+  console.log("Authheader: ", authHeader);
+
+  if (!authHeader) {
+    return res.status(401).send({ msg: "Unauthorized.." })
+  }
+
+  const Bearer = authHeader.split(" ")[0]
+  console.log("Bearer: ", Bearer);
+  const token = authHeader.split(" ")[1]
+  // console.log("Token: ", token);
+
+  if (!token) {
+    return res.status(401).send({ msg: "Unauthorized....." })
+  }
+
+  const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL}/api/auth/jwks`))
+
+  try {
+    const { payload } = await jwtVerify(token, JWKS)
+    req.user = payload;
+    // console.log(payload)
+    next()
+  } catch (error) {
+    console.error("Token verification error:", error);
+    return res.status(401).send({ message: "Invalid or expired token." });
+  }
+
+}
+
+app.post("/create-events", verifyToken, async (req, res) => {
   try {
     const data = req.body;
 
@@ -50,14 +83,26 @@ app.post("/create-events", async (req, res) => {
   }
 });
 
+// Public: no authentication required
 app.get("/events", async (req, res) => {
   try {
     const result = await eventsCollection.find().toArray();
-
     res.send(result);
   } catch (error) {
     console.error("Fetch events error:", error);
+    res.status(500).send({
+      message: "Failed to fetch events.",
+    });
+  }
+});
 
+// Protected: authentication required
+app.get("/my-events", verifyToken, async (req, res) => {
+  try {
+    const result = await eventsCollection.find().toArray();
+    res.send(result);
+  } catch (error) {
+    console.error("Fetch my events error:", error);
     res.status(500).send({
       message: "Failed to fetch events.",
     });
@@ -92,7 +137,7 @@ app.get("/upcomingevents", async (req, res) => {
 });
 
 
-app.get("/events/:id", async (req, res) => {
+app.get("/events/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -207,7 +252,7 @@ app.post("/eventParticipants", async (req, res) => {
 
     // 2. Check whether the event has already been completed.
     const eventDate = new Date(
-      `${ event.eventDate.slice(0, 10) } T00:00:00Z`
+      `${event.eventDate.slice(0, 10)} T00:00:00Z`
     );
 
     const today = new Date();
@@ -270,8 +315,7 @@ app.post("/eventParticipants", async (req, res) => {
 });
 
 
-
-app.get("/myjoinedevents/:userId", async (req, res) => {
+app.get("/myjoinedevents/:userId", verifyToken, async (req, res) => {
   try {
     const { userId } = req.params;
 
@@ -381,7 +425,7 @@ app.delete("/eventParticipants", async (req, res) => {
 });
 
 
-app.delete("/events/:id", async (req, res) => {
+app.delete("/events/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
 
