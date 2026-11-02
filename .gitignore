@@ -1,5 +1,4 @@
 node_modules
 .env
-index1.js
 .vercel
-.env*
+

@@ -38,14 +38,14 @@ await eventParticipantsCollection.createIndex(
 const verifyToken = async (req, res, next) => {
 
   const authHeader = req.headers.authorization
-  console.log("Authheader: ", authHeader);
+  // console.log("Authheader: ", authHeader);
 
   if (!authHeader) {
     return res.status(401).send({ msg: "Unauthorized.." })
   }
 
   const Bearer = authHeader.split(" ")[0]
-  console.log("Bearer: ", Bearer);
+  // console.log("Bearer: ", Bearer);
   const token = authHeader.split(" ")[1]
   // console.log("Token: ", token);
 
@@ -137,32 +137,24 @@ app.get("/upcomingevents", async (req, res) => {
 });
 
 
-app.get("/events/:id", verifyToken, async (req, res) => {
+app.get("/events/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({
-        message: "Invalid event ID.",
-      });
-    }
-
-    const result = await eventsCollection.findOne({
+    const event = await eventsCollection.findOne({
       _id: new ObjectId(id),
     });
 
-    if (!result) {
+    if (!event) {
       return res.status(404).send({
-        message: "Event not found.",
+        message: "Event not found",
       });
     }
 
-    res.send(result);
-  } catch (error) {
-    console.error("Fetch event error:", error);
-
-    res.status(500).send({
-      message: "Failed to fetch event.",
+    res.send(event);
+  } catch {
+    res.status(400).send({
+      message: "Invalid event ID",
     });
   }
 });
@@ -357,6 +349,7 @@ app.get("/myjoinedevents/:userId", verifyToken, async (req, res) => {
     });
   }
 });
+
 
 
 app.delete("/eventParticipants", verifyToken, async (req, res) => {
