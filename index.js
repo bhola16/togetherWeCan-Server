@@ -167,7 +167,7 @@ app.get("/events/:id", verifyToken, async (req, res) => {
   }
 });
 
-app.patch("/events/:id", async (req, res) => {
+app.patch("/events/:id", verifyToken , async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -221,11 +221,13 @@ app.patch("/events/:id", async (req, res) => {
 });
 
 
-app.post("/eventParticipants", async (req, res) => {
+app.post("/eventParticipants", verifyToken, async (req, res) => {
   try {
     const data = req.body;
 
-    const { eventId, userId, userEmail } = data;
+    const { eventId } = req.body;
+    const userId = req.user.sub;
+    const userEmail = req.user.email;
 
     if (!eventId || !userId || !userEmail) {
       return res.status(400).send({
@@ -284,7 +286,10 @@ app.post("/eventParticipants", async (req, res) => {
 
     // 4. Prepare participant data.
     const participantData = {
-      ...data,
+      ...req.body,
+      eventId,
+      userId,
+      userEmail,
       eventTitle: event.title,
       eventDate: event.eventDate,
       joinedAt: new Date(),
@@ -353,9 +358,11 @@ app.get("/myjoinedevents/:userId", verifyToken, async (req, res) => {
   }
 });
 
-app.delete("/eventParticipants", async (req, res) => {
+
+app.delete("/eventParticipants", verifyToken, async (req, res) => {
   try {
-    const { eventId, userId } = req.body;
+    const { eventId } = req.body;
+    const userId = req.user.sub;
 
     if (!eventId || !userId) {
       return res.status(400).send({
@@ -543,18 +550,19 @@ app.get("/eventParticipants/count", async (req, res) => {
   }
 });
 
-app.get("/eventParticipants/check", async (req, res) => {
+app.get("/eventParticipants/check", verifyToken, async (req, res) => {
   try {
-    const { userId, eventId } = req.query;
+    const { eventId } = req.query;
+    const userId = req.user.sub;
 
-    if (!userId || !eventId) {
+    if (!eventId) {
       return res.status(400).send({
-        message: "User ID and Event ID are required.",
+        message: "Event ID is required.",
       });
     }
 
     const participant = await eventParticipantsCollection.findOne({
-      userId: userId.toString(),
+      userId,
       eventId: eventId.toString(),
     });
 
@@ -562,8 +570,6 @@ app.get("/eventParticipants/check", async (req, res) => {
       joined: !!participant,
     });
   } catch (error) {
-    console.error("Check participation error:", error);
-
     res.status(500).send({
       message: "Failed to check participation.",
     });
